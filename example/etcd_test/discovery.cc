@@ -6,6 +6,10 @@
 #include<thread>
 #include"etcd.hpp"
 #include<gflags/gflags.h>
+#include<brpc/channel.h>
+#include<chrono>
+#include"../brpc_test/main.pb.h"
+#include"channel.hpp"
 DEFINE_bool(mode, false, "mode - 运行模式： true-发布模式，日志通过文件输出； false-调试模式，日志通过屏幕输出。");
 DEFINE_string(file, "log/default_log.txt", "若为发布模式，则指定日志文件，默认为：log/default_log.txt。");
 DEFINE_int32(level, 1, "是否开启地址重用");//1是debug等级，查阅spdlog::level::level_enum可知
@@ -57,15 +61,40 @@ DEFINE_int32(level, 1, "是否开启地址重用");//1是debug等级，查阅spd
 //     return 0;
 // }
 
-void func(std::string str1, std::string str2)
-{
-    std::cout << str1 << "@^@" << str2 << std::endl;
-}
+// void func(std::string str1, std::string str2)
+// {
+//     std::cout << str1 << "@^@" << str2 << std::endl;
+// }
 
+// int main(int argc, char* argv[])
+// {
+//     google::ParseCommandLineFlags(&argc, &argv, true);
+//     init_logger(FLAGS_mode, FLAGS_file, FLAGS_level);
+//     thx::Discovery disc("http://127.0.0.1:2379", "/service/user/instance", func, func);
+//     getchar();
+// }
 int main(int argc, char* argv[])
 {
     google::ParseCommandLineFlags(&argc, &argv, true);
     init_logger(FLAGS_mode, FLAGS_file, FLAGS_level);
-    thx::Discovery disc("http://127.0.0.1:2379", "/service/user/instance", func, func);
+    thx::ServiceManager sm;
+    sm.declared("/service/echo");
+    auto put_cb = std::bind(&thx::ServiceManager::onServiceOnline, &sm, std::placeholders::_1, std::placeholders::_2);
+    auto del_cb = std::bind(&thx::ServiceManager::onServiceOffline, &sm, std::placeholders::_1, std::placeholders::_2);
+    thx::Discovery disc("http://127.0.0.1:2379", "/service/echo", put_cb, del_cb);
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+    example::EchoService_Stub stub(sm.choose("/service/echo").get());
+    example::EchoRequest req;
+    req.set_message("hello world");
+    brpc::Controller* controller_ptr = new brpc::Controller;
+    example::EchoResponse *response_ptr =  new example::EchoResponse;
+    stub.Echo(controller_ptr, &req, response_ptr, nullptr);
+    if (controller_ptr->Failed() == true) {
+        std::cout << "Rpc调用失败：" << controller_ptr->ErrorText() << std::endl;
+        return -1;
+    }
+    std::cout << "收到消息：" << response_ptr->message() << std::endl;
+    delete controller_ptr;
+    delete response_ptr;
     getchar();
 }
